@@ -4,11 +4,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 GNEWS_KEY = os.getenv("GNEWS_KEY")
-print("GNEWS_KEY" + GNEWS_KEY)
 NEWS_SERVICES = os.getenv("NEWS_API_KEY")
 
 async def get_news(symbol: str):
-    print("GNEWS_KEY" + GNEWS_KEY)
     if not GNEWS_KEY:
         return {"error": "Missing GNEWS_KEY in .env"}
 

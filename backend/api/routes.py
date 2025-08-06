@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from .services import price_services, news_services, summary_services
+from .services import price_services, news_services, summary_services, metadata_services
 
 router = APIRouter()
 
@@ -9,7 +9,7 @@ async def get_stock_price(symbol: str):
 
 @router.get("/api/stocks/{symbol}/metadata")
 async def get_metadata(symbol: str):
-    return await price_services.get_metadata(symbol)
+    return metadata_services.get_metadata(symbol)
 
 @router.get("/api/news/{symbol}")
 async def get_news(symbol: str):

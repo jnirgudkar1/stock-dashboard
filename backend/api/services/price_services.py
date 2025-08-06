@@ -41,114 +41,95 @@ async def fetch_alpha_vantage(symbol):
         try:
             res = await client.get(url)
             data = res.json()
-            if "Note" in data or "Error Message" in data:
-                return None
             ts = data.get("Time Series (Daily)")
             if not ts:
                 return None
-            latest = sorted(ts.keys())[-1]
-            price = float(ts[latest]["4. close"])
-            return {"symbol": symbol, "price": price, "date": latest, "source": "Alpha Vantage"}
-        except:
+            prices = {
+                date: {
+                    "4. close": day["4. close"],
+                    "5. volume": day["5. volume"]
+                } for date, day in ts.items()
+            }
+            latest = sorted(prices.keys())[-1]
+            latest_price = float(prices[latest]["4. close"])
+            return {
+                "symbol": symbol,
+                "price": latest_price,
+                "date": latest,
+                "source": "Alpha Vantage",
+                "prices": prices
+            }
+        except Exception as e:
+            print("Alpha Vantage error:", e)
             return None
 
 async def fetch_twelve_data(symbol):
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1week&outputsize=1&apikey={TWELVE_KEY}"
+    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1day&outputsize=100&apikey={TWELVE_KEY}"
     async with httpx.AsyncClient() as client:
         try:
             res = await client.get(url)
             data = res.json()
-            if "code" in data or "message" in data:
+            if "values" not in data:
                 return None
-            if "values" in data:
-                v = data["values"][0]
-                return {"symbol": symbol, "price": float(v["close"]), "date": v["datetime"], "source": "Twelve Data"}
-        except:
+            prices = {
+                item["datetime"][:10]: {
+                    "4. close": item["close"],
+                    "5. volume": item.get("volume", "0")
+                } for item in data["values"]
+            }
+            latest = sorted(prices.keys())[-1]
+            latest_price = float(prices[latest]["4. close"])
+            return {
+                "symbol": symbol,
+                "price": latest_price,
+                "date": latest,
+                "source": "Twelve Data",
+                "prices": prices
+            }
+        except Exception as e:
+            print("Twelve Data error:", e)
             return None
 
 async def fetch_finnhub(symbol):
-    url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_KEY}"
+    candle_url = f"https://finnhub.io/api/v1/stock/candle"
+    now = int(time.time())
+    one_month_ago = now - 60 * 60 * 24 * 60
+    params = {
+        "symbol": symbol,
+        "resolution": "D",
+        "from": one_month_ago,
+        "to": now,
+        "token": FINNHUB_KEY
+    }
+
     async with httpx.AsyncClient() as client:
         try:
-            res = await client.get(url)
+            res = await client.get(candle_url, params=params)
             data = res.json()
-            if "c" in data and data["c"] > 0:
-                return {"symbol": symbol, "price": data["c"], "date": time.strftime('%Y-%m-%d'), "source": "Finnhub"}
-        except:
+            if data.get("s") != "ok":
+                return None
+
+            timestamps = data["t"]
+            closes = data["c"]
+            volumes = data["v"]
+
+            prices = {}
+            for i in range(len(timestamps)):
+                date = time.strftime('%Y-%m-%d', time.localtime(timestamps[i]))
+                prices[date] = {
+                    "4. close": str(closes[i]),
+                    "5. volume": str(volumes[i])
+                }
+
+            latest = sorted(prices.keys())[-1]
+            latest_price = float(prices[latest]["4. close"])
+            return {
+                "symbol": symbol,
+                "price": latest_price,
+                "date": latest,
+                "source": "Finnhub",
+                "prices": prices
+            }
+        except Exception as e:
+            print("Finnhub error:", e)
             return None
-
-async def get_metadata(symbol: str):
-    symbol = symbol.upper()
-    now = time.time()
-    if symbol in metadata_cache:
-        ts, data = metadata_cache[symbol]
-        if now - ts < CACHE_TTL:
-            return data
-
-    # Alpha Vantage
-    if ALPHA_KEY:
-        try:
-            url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={symbol}&apikey={ALPHA_KEY}"
-            async with httpx.AsyncClient() as client:
-                res = await client.get(url)
-                data = res.json()
-                if "Note" in data or "Information" in data or not data.get("MarketCapitalization"):
-                    raise Exception("Alpha Vantage limit hit or data unavailable")
-                result = {
-                    "marketCap": data.get("MarketCapitalization"),
-                    "peRatio": float(data.get("PERatio")) if is_valid_number(data.get("PERatio")) else None,
-                    "dividendYield": float(data.get("DividendYield")) * 100 if is_valid_number(data.get("DividendYield")) else None,
-                    "sector": data.get("Sector"),
-                    "description": data.get("Description"),
-                    "website": data.get("OfficialSite")
-                }
-                metadata_cache[symbol] = (now, result)
-                return result
-        except Exception as e:
-            print("Alpha Vantage metadata error:", e)
-
-    # Twelve Data
-    if TWELVE_KEY:
-        try:
-            url = f"https://api.twelvedata.com/profile?symbol={symbol}&apikey={TWELVE_KEY}"
-            async with httpx.AsyncClient() as client:
-                res = await client.get(url)
-                data = res.json()
-                if "code" in data or not data.get("market_cap"):
-                    raise Exception("Twelve Data metadata error")
-                result = {
-                    "marketCap": data.get("market_cap"),
-                    "peRatio": float(data.get("pe_ratio")) if is_valid_number(data.get("pe_ratio")) else None,
-                    "dividendYield": float(data.get("dividend_rate")) if is_valid_number(data.get("dividend_rate")) else None,
-                    "sector": data.get("sector"),
-                    "description": data.get("description"),
-                    "website": data.get("website")
-                }
-                metadata_cache[symbol] = (now, result)
-                return result
-        except Exception as e:
-            print("Twelve Data metadata error:", e)
-
-    # Finnhub
-    if FINNHUB_KEY:
-        try:
-            url = f"https://finnhub.io/api/v1/stock/profile2?symbol={symbol}&token={FINNHUB_KEY}"
-            async with httpx.AsyncClient() as client:
-                res = await client.get(url)
-                data = res.json()
-                if not data.get("marketCapitalization"):
-                    raise Exception("Finnhub metadata missing")
-                result = {
-                    "marketCap": str(data.get("marketCapitalization")),
-                    "peRatio": float(data.get("peBasicExclExtraTTM")) if is_valid_number(data.get("peBasicExclExtraTTM")) else None,
-                    "dividendYield": float(data.get("dividendYield")) * 100 if is_valid_number(data.get("dividendYield")) else None,
-                    "sector": data.get("finnhubIndustry"),
-                    "description": None,
-                    "website": data.get("weburl")
-                }
-                metadata_cache[symbol] = (now, result)
-                return result
-        except Exception as e:
-            print("Finnhub metadata error:", e)
-
-    return {"error": "Failed to retrieve metadata from all sources."}

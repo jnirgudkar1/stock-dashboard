@@ -7,16 +7,32 @@ import {
   Tooltip,
   ResponsiveContainer,
   BarChart,
-  Bar,
+  Bar
 } from 'recharts';
 
-const AssetChart = ({ data }) => {
-  if (!data?.length) return null;
+const AssetChart = ({ prices }) => {
+  if (!prices || typeof prices !== 'object') return null;
+
+  const dates = Object.keys(prices).sort();
+  const formatted = dates.map((date, index, arr) => {
+    const close = parseFloat(prices[date]['4. close']);
+    const volume = parseInt(prices[date]['5. volume']);
+
+    let sma = null;
+    if (index >= 6) {
+      const avg = arr
+        .slice(index - 6, index + 1)
+        .reduce((sum, d) => sum + parseFloat(prices[d]['4. close']), 0) / 7;
+      sma = parseFloat(avg.toFixed(2));
+    }
+
+    return { date, price: close, volume, sma };
+  });
 
   return (
     <>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data}>
+        <LineChart data={formatted}>
           <XAxis dataKey="date" hide />
           <YAxis domain={['auto', 'auto']} />
           <Tooltip />
@@ -26,7 +42,7 @@ const AssetChart = ({ data }) => {
       </ResponsiveContainer>
 
       <ResponsiveContainer width="100%" height={100}>
-        <BarChart data={data}>
+        <BarChart data={formatted}>
           <XAxis dataKey="date" hide />
           <YAxis hide />
           <Tooltip />
