@@ -1,0 +1,27 @@
+/backend/.env
+/frontend/.env
+/frontwnd/.vite/
+# dependencies
+node_modules/
+venv/
+__pycache__/
+
+# environment
+.env
+*.local
+
+# builds
+dist/
+build/
+
+# logs
+*.log
+
+# IDE/editor
+.vscode/
+.idea/
+.DS_Store
+
+# system files
+*.swp
+*.swo
