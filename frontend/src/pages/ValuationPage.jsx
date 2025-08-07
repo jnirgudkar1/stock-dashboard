@@ -1,36 +1,57 @@
 // src/pages/ValuationPage.jsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import ValuationResult from '../components/ValuationResult';
+import { useSymbol } from '../components/SymbolContext';
 
 const ValuationPage = () => {
+  const { symbol: selectedSymbol } = useSymbol();
+  const [valuationResult, setValuationResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // 🧠 Simulate shared news URLs from Insights tab
+  const newsUrls = [
+    `https://finance.yahoo.com/news/apple-reports-third-quarter-results-200500763.html`,
+    `https://www.reuters.com/technology/apple-posts-better-than-expected-results-boosted-iphone-sales-2024-08-01/`
+  ];
+
+  useEffect(() => {
+    const fetchValuation = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/stocks/${selectedSymbol}/valuation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ news_urls: newsUrls })
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text}`);
+        }
+
+        const data = await res.json();
+        setValuationResult(data);
+        setError(null);
+      } catch (err) {
+        console.error("Valuation fetch error:", err.message);
+        setError("Failed to load valuation data.");
+        setValuationResult(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchValuation();
+  }, [selectedSymbol]);
+
   return (
-    <div className="bg-white p-6 rounded shadow">
-      <h2 className="text-2xl font-semibold mb-4">📉 Valuation & Prediction</h2>
-      <div className="space-y-4">
-        <section className="bg-gray-50 border border-purple-200 rounded-lg p-4 shadow-sm">
-          <h3 className="text-lg font-medium text-purple-700">🔎 DCF Fair Value</h3>
-          <p>Estimated value: <span className="font-bold text-green-600">$165.00</span></p>
-          <p className="text-gray-500 text-sm">Assuming 8% growth, 10% discount rate, 5-year horizon.</p>
-        </section>
+    <div className="p-4 space-y-4">
+      <h1 className="text-2xl font-semibold">Valuation</h1>
 
-        <section className="bg-gray-50 border border-purple-200 rounded-lg p-4 shadow-sm">
-          <h3 className="text-lg font-medium text-purple-700">📐 Graham Formula</h3>
-          <p>Intrinsic value: <span className="font-bold text-blue-600">$152.80</span></p>
-          <p className="text-gray-500 text-sm">Assumes EPS: $5.8, Growth: 6.5%</p>
-        </section>
-
-        <section className="bg-gray-50 border border-purple-200 rounded-lg p-4 shadow-sm">
-          <h3 className="text-lg font-medium text-purple-700">🤖 ML-Based Prediction</h3>
-          <p>Next 30-day price range: <span className="font-bold text-orange-600">$148 - $163</span></p>
-          <p className="text-gray-500 text-sm">Confidence: 70%, based on technical indicators.</p>
-        </section>
-
-        <section className="bg-gray-50 border border-purple-200 rounded-lg p-4 shadow-sm">
-          <p className="text-sm">
-            🧠 Summary: <strong>AAPL appears moderately undervalued</strong> based on DCF and Graham models.
-            ML model suggests a neutral to bullish outlook for the short term.
-          </p>
-        </section>
-      </div>
+      {loading && <p className="text-sm text-gray-500">Calculating valuation...</p>}
+      {error && <p className="text-sm text-red-500">{error}</p>}
+      {!loading && !error && <ValuationResult result={valuationResult} />}
     </div>
   );
 };
