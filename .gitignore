@@ -1,6 +1,7 @@
 /backend/.env
 /frontend/.env
 /frontwnd/.vite/
+/training_pipeline/.env
 # dependencies
 node_modules/
 venv/

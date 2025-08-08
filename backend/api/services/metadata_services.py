@@ -1,11 +1,25 @@
 import os
+import time
 import requests
 
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query"
 
+# New cache dict
+metadata_cache = {}
+CACHE_TTL = 7200  # 2 hours
+
 def get_metadata(symbol: str) -> dict:
-    """Fetches stock metadata from Alpha Vantage only."""
+    symbol = symbol.upper()
+    now = time.time()
+
+    # Check cache
+    if symbol in metadata_cache:
+        ts, data = metadata_cache[symbol]
+        if now - ts < CACHE_TTL:
+            return data
+
+    # Live fetch
     params = {
         "function": "OVERVIEW",
         "symbol": symbol,
@@ -20,8 +34,7 @@ def get_metadata(symbol: str) -> dict:
         if "Symbol" not in data:
             raise ValueError("Alpha Vantage metadata error")
 
-        # Normalize output format
-        return {
+        result = {
             "symbol": data.get("Symbol"),
             "name": data.get("Name"),
             "description": data.get("Description"),
@@ -33,6 +46,10 @@ def get_metadata(symbol: str) -> dict:
             "eps": float(data.get("EPS", 0)),
             "website": data.get("Website"),
         }
+
+        # ✅ Cache result
+        metadata_cache[symbol] = (now, result)
+        return result
 
     except Exception as e:
         print(f"Alpha Vantage metadata error: {e}")

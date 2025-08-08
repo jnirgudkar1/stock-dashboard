@@ -4,6 +4,8 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List
+from .services.valuation_predictor import predict_price_direction
+
 
 from .services.metadata_services import get_metadata
 from .services.valuation_scorer import compute_valuation_score
@@ -37,3 +39,10 @@ async def get_stock_valuation(symbol: str, payload: ValuationRequest):
 
     result = compute_valuation_score(payload.news_urls, metadata)
     return JSONResponse(content=result)
+
+@router.get("/predict/{symbol}")
+def get_prediction(symbol: str):
+    try:
+        return predict_price_direction(symbol.upper())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
