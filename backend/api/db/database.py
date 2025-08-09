@@ -1,159 +1,162 @@
 import sqlite3
 from pathlib import Path
+from typing import Iterable, Mapping, Optional
 from datetime import datetime
 
-DB_PATH = Path("backend/db/stocks.db")
+# Absolute path: backend/db/stocks.db
+ABS_DB = (Path(__file__).resolve().parents[2] / "db" / "stocks.db").resolve()
 
 def get_connection():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    ABS_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(ABS_DB), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    return conn
 
 def create_all_tables():
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    # Table: stock_metadata
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS stock_metadata (
-        symbol TEXT PRIMARY KEY,
-        name TEXT,
-        description TEXT,
-        sector TEXT,
-        industry TEXT,
-        market_cap REAL,
-        pe_ratio REAL,
-        dividend_yield REAL,
-        eps REAL,
-        website TEXT,
-        last_updated TIMESTAMP
-    );
-    """)
-
-    # Table: stock_features
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS stock_features (
-        symbol TEXT PRIMARY KEY,
-        close_price REAL,
-        pe_ratio REAL,
-        eps REAL,
-        revenue_growth REAL,
-        last_updated TIMESTAMP
-    );
-    """)
-
-    # Table: valuation_data
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS valuation_data (
-        symbol TEXT PRIMARY KEY,
-        sentiment_score REAL,
-        financial_score REAL,
-        growth_score REAL,
-        total_score REAL,
-        verdict TEXT,
-        contradiction TEXT,
-        valuation_label TEXT,
-        confidence REAL,
-        last_updated TIMESTAMP
-    );
-    """)
-
-    # Table: news_cache
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS news_cache (
-        url TEXT PRIMARY KEY,
-        content TEXT,
-        sentiment REAL,
-        domain TEXT,
-        confidence REAL,
-        timestamp TIMESTAMP
-    );
-    """)
-
-    # Table: price_predictions
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS price_predictions (
-        symbol TEXT PRIMARY KEY,
-        predicted_verdict TEXT,
-        confidence REAL,
-        model_inputs TEXT,
-        last_updated TIMESTAMP
-    );
-    """)
-
-    # Table: historical_prices
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS historical_prices (
-        symbol TEXT,
-        date TEXT,
-        open REAL,
-        high REAL,
-        low REAL,
-        close REAL,
-        volume INTEGER,
-        PRIMARY KEY (symbol, date)
-    );
-    """)
-
-    conn.commit()
-    conn.close()
-    print("✅ Tables created successfully.")
-
-
-# ========================
-# UPSERT HELPERS
-# ========================
-
-def upsert_stock_features(symbol, close_price, pe_ratio, eps, revenue_growth):
     with get_connection() as conn:
-        conn.execute("""
-            INSERT INTO stock_features (symbol, close_price, pe_ratio, eps, revenue_growth, last_updated)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(symbol) DO UPDATE SET
-                close_price=excluded.close_price,
-                pe_ratio=excluded.pe_ratio,
-                eps=excluded.eps,
-                revenue_growth=excluded.revenue_growth,
-                last_updated=excluded.last_updated;
-        """, (symbol, close_price, pe_ratio, eps, revenue_growth, datetime.utcnow()))
+        cur = conn.cursor()
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS stock_metadata(
+            symbol TEXT PRIMARY KEY,
+            name TEXT, description TEXT, sector TEXT, industry TEXT, website TEXT,
+            marketCap REAL, peRatio REAL, dividendYield REAL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS historical_prices(
+            symbol TEXT NOT NULL,
+            date   TEXT NOT NULL,
+            open REAL, high REAL, low REAL, close REAL, volume INTEGER,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(symbol, date)
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS news_cache(
+            url TEXT PRIMARY KEY,
+            symbol TEXT, title TEXT, content TEXT,
+            sentiment_score REAL, impact_score REAL,
+            published_at TEXT,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS stock_features(
+            symbol TEXT PRIMARY KEY,
+            close_price REAL, pe_ratio REAL, eps REAL, revenue_growth REAL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS valuation_data(
+            symbol TEXT PRIMARY KEY,
+            sentiment_score REAL, financial_score REAL, growth_score REAL,
+            total_score REAL, verdict TEXT,
+            eps_growth REAL, revenue_growth REAL, confidence REAL,
+            contradiction TEXT, valuation_label TEXT,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS price_predictions(
+            symbol TEXT PRIMARY KEY,
+            prob_up REAL, prob_down REAL, label TEXT,
+            model_loaded_at REAL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+
         conn.commit()
 
-def upsert_valuation_data(symbol, sentiment_score, financial_score, growth_score, total_score,
-                          verdict, eps_growth, revenue_growth, confidence, contradiction, valuation_label):
+# ------------- Cache helpers -------------
+def db_upsert_metadata(row: Mapping):
+    cols = ("symbol","name","description","sector","industry","website","marketCap","peRatio","dividendYield")
+    vals = [row.get(c) for c in cols]
+    placeholders = ",".join(["?"]*len(cols))
+    updates = ",".join([f"{c}=excluded.{c}" for c in cols[1:]])
+    sql = f"""
+      INSERT INTO stock_metadata({",".join(cols)}) VALUES({placeholders})
+      ON CONFLICT(symbol) DO UPDATE SET {updates}, last_updated=CURRENT_TIMESTAMP
+    """
     with get_connection() as conn:
-        conn.execute("""
-            INSERT INTO valuation_data (
-                symbol, sentiment_score, financial_score, growth_score, total_score,
-                verdict, eps_growth, revenue_growth, confidence, contradiction, valuation_label, last_updated
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(symbol) DO UPDATE SET
-                sentiment_score=excluded.sentiment_score,
-                financial_score=excluded.financial_score,
-                growth_score=excluded.growth_score,
-                total_score=excluded.total_score,
-                verdict=excluded.verdict,
-                eps_growth=excluded.eps_growth,
-                revenue_growth=excluded.revenue_growth,
-                confidence=excluded.confidence,
-                contradiction=excluded.contradiction,
-                valuation_label=excluded.valuation_label,
-                last_updated=excluded.last_updated;
-        """, (
-            symbol, sentiment_score, financial_score, growth_score, total_score,
-            verdict, eps_growth, revenue_growth, confidence, contradiction, valuation_label, datetime.utcnow()
-        ))
+        conn.execute(sql, vals)
         conn.commit()
 
-def upsert_news_cache(symbol, title, url, content, sentiment_score, impact_score, published_at):
+def db_get_metadata(symbol: str) -> Optional[dict]:
     with get_connection() as conn:
-        conn.execute("""
-            INSERT OR IGNORE INTO news_cache (
-                symbol, title, url, content, sentiment_score, impact_score, published_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?);
-        """, (
-            symbol, title, url, content, sentiment_score, impact_score, published_at
-        ))
+        cur = conn.execute("SELECT * FROM stock_metadata WHERE symbol=?", (symbol,))
+        r = cur.fetchone()
+        return dict(r) if r else None
+
+def db_upsert_prices(rows: Iterable[Mapping]):
+    rows = list(rows or [])
+    if not rows:
+        return
+    sql = """
+      INSERT INTO historical_prices(symbol,date,open,high,low,close,volume)
+      VALUES(?,?,?,?,?,?,?)
+      ON CONFLICT(symbol,date) DO UPDATE SET
+        open=excluded.open, high=excluded.high, low=excluded.low,
+        close=excluded.close, volume=excluded.volume,
+        last_updated=CURRENT_TIMESTAMP
+    """
+    with get_connection() as conn:
+        conn.executemany(sql, [
+            (r["symbol"], r["date"], r.get("open"), r.get("high"),
+             r.get("low"), r.get("close"), r.get("volume"))
+            for r in rows
+        ])
         conn.commit()
 
-# ========== Test ==========
-if __name__ == "__main__":
-    create_all_tables()
+def db_get_prices(symbol: str, limit: int = 500) -> list[dict]:
+    with get_connection() as conn:
+        cur = conn.execute("""
+          SELECT * FROM historical_prices
+          WHERE symbol=?
+          ORDER BY date DESC
+          LIMIT ?
+        """, (symbol, limit))
+        return [dict(x) for x in cur.fetchall()]
+
+def db_get_prices_last_updated(symbol: str) -> Optional[datetime]:
+    with get_connection() as conn:
+        r = conn.execute("""
+          SELECT MAX(last_updated) AS lu
+          FROM historical_prices
+          WHERE symbol=?
+        """, (symbol,)).fetchone()
+        if not r or not r["lu"]:
+            return None
+        return datetime.strptime(r["lu"], "%Y-%m-%d %H:%M:%S")
+
+def db_get_stock_features(symbol: str) -> dict | None:
+    with get_connection() as conn:
+        r = conn.execute(
+            "SELECT symbol, close_price, pe_ratio, eps, revenue_growth, last_updated "
+            "FROM stock_features WHERE symbol=?",
+            (symbol,),
+        ).fetchone()
+        return dict(r) if r else None
+
+def db_upsert_stock_features(row: dict) -> None:
+    cols = ("symbol", "close_price", "pe_ratio", "eps", "revenue_growth")
+    vals = [row.get(c) for c in cols]
+    placeholders = ",".join(["?"] * len(cols))
+    updates = ",".join([f"{c}=excluded.{c}" for c in cols[1:]])
+    sql = f"""
+      INSERT INTO stock_features({",".join(cols)}) VALUES({placeholders})
+      ON CONFLICT(symbol) DO UPDATE SET {updates}, last_updated=CURRENT_TIMESTAMP
+    """
+    with get_connection() as conn:
+        conn.execute(sql, vals)
+        conn.commit()

@@ -22,7 +22,7 @@ from .services.prices import get_prices, PriceServiceError
 from .services.news import (
     search_news,
     fetch_and_cache_article_text,
-    summarize,
+    summarize_text
 )
 from .services.valuation import score_valuation, predict_direction
 
@@ -82,7 +82,7 @@ def api_fetch_article(url: str = Query(...)):
     try:
         art = fetch_and_cache_article_text(url)
         # small helper: inline a short summary for UI tooltip convenience
-        art["summary"] = summarize(art.get("text", ""), max_sentences=3)
+        art["summary"] = summarize_text(art.get("text", ""), max_sentences=3)
         return art
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Article fetch error: {e}")
