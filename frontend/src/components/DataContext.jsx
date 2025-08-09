@@ -1,6 +1,7 @@
-// ✅ New: src/components/DataContext.jsx
+// frontend/src/components/DataContext.jsx
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useSymbol } from './SymbolContext';
+import { getStockNews, getValuation } from '../services/api';
 
 const DataContext = createContext();
 
@@ -10,45 +11,41 @@ export const DataProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     const fetchDataIfNeeded = async () => {
       const now = Date.now();
       const cached = cache[symbol];
-      const expired = !cached || now - cached.lastFetched > 2 * 60 * 60 * 1000;
+      const expired = !cached || now - cached.lastFetched > 2 * 60 * 60 * 1000; // 2h
 
       if (!expired) return;
 
       setLoading(true);
       try {
-        // Fetch news
-        const newsRes = await fetch(`/api/news/${symbol}`);
-        const articles = await newsRes.json();
-        const newsUrls = Array.isArray(articles) ? articles.map((a) => a.url) : [];
+        const [newsRes, valuationRes] = await Promise.all([
+          getStockNews(symbol, { max: 20 }),   // GET /api/stocks/{symbol}/news
+          getValuation(symbol),                // GET /api/stocks/{symbol}/valuation
+        ]);
 
-        // Fetch valuation
-        const valRes = await fetch(`/api/stocks/${symbol}/valuation`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ news_urls: newsUrls })
-        });
-        const valuation = await valRes.json();
-
-        setCache((prev) => ({
+        if (!alive) return;
+        setCache(prev => ({
           ...prev,
           [symbol]: {
-            news: articles,
-            valuation,
-            lastFetched: now
+            news: newsRes?.items || [],
+            valuation: valuationRes || null,
+            lastFetched: now,
           }
         }));
-      } catch (err) {
-        console.error("Failed to prefetch news/valuation:", err);
+      } catch (e) {
+        // optional: surface error somewhere
+        console.error('DataContext fetch error:', e);
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
     };
 
     fetchDataIfNeeded();
-  }, [symbol]);
+    return () => { alive = false; };
+  }, [symbol]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <DataContext.Provider value={{ data: cache[symbol] || {}, loading }}>

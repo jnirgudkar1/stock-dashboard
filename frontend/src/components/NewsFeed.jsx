@@ -7,44 +7,43 @@ const getSentiment = (text = '') => {
   return 'neutral';
 };
 
-const getImpactScore = (text = '') => {
+const getImpact = (title = '', desc = '') => {
+  const text = `${title} ${desc}`;
   const score = (text.match(/ai|earnings|merger|iphone|forecast|inflation/gi) || []).length;
   if (score >= 3) return '🔥 High Impact';
   if (score === 2) return '⚠️ Medium Impact';
-  if (score === 1) return '🟡 Low Impact';
-  return null;
+  return 'Low Impact';
 };
 
-const NewsFeed = ({ articles = [] }) => {
-  if (!articles.length) return <p className="text-gray-500">No news available.</p>;
-
+// Expects items: [{ title, source, published_at, url, description }]
+const NewsFeed = ({ items = [] }) => {
   return (
-    <div className="space-y-4">
-      {articles.map((a, i) => {
-        const sentiment = getSentiment(a.title + ' ' + a.description);
-        const impact = getImpactScore(a.title + ' ' + a.description);
-
-        return (
-          <div key={i} className="border rounded-lg p-4 shadow flex gap-4 bg-white">
-            <img src={a.image} alt={a.title} className="w-28 h-20 object-cover rounded" />
-            <div className="flex-1">
-              <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 font-semibold hover:underline">
-                {a.title}
-              </a>
-              <p className="text-sm text-gray-600 mb-1">
-                {a.source?.name} • {new Date(a.publishedAt).toLocaleDateString()}
-              </p>
-              <p className="text-sm text-gray-800">{a.description}</p>
-              <div className="text-xs mt-1 text-gray-600 flex gap-2">
-                {impact && <span>{impact}</span>}
-                {sentiment === 'positive' && <span className="text-green-600">🟢 Positive</span>}
-                {sentiment === 'negative' && <span className="text-red-600">🔴 Negative</span>}
-                {sentiment === 'neutral' && <span className="text-gray-500">⚪ Neutral</span>}
-              </div>
-            </div>
+    <div className="space-y-3">
+      {items.map((n, i) => (
+        <a
+          key={i}
+          href={n.url}
+          target="_blank"
+          rel="noreferrer"
+          className="block bg-white rounded-xl p-4 shadow border hover:shadow-md transition"
+        >
+          <div className="text-sm text-gray-500 flex gap-2">
+            <span>{n.source || 'Unknown'}</span>
+            <span>•</span>
+            <span>{new Date((n.published_at || 0) * 1000).toLocaleString()}</span>
           </div>
-        );
-      })}
+          <div className="font-semibold">{n.title}</div>
+          {n.description && <div className="text-sm text-gray-600 mt-1">{n.description}</div>}
+          <div className="text-xs mt-2 flex gap-3">
+            <span className="px-2 py-0.5 rounded bg-gray-100">
+              {getSentiment(`${n.title}. ${n.description || ''}`)}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-gray-100">
+              {getImpact(n.title, n.description)}
+            </span>
+          </div>
+        </a>
+      ))}
     </div>
   );
 };

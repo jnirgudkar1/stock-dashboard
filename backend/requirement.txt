@@ -7,3 +7,5 @@ cohere
 newspaper3k
 lxml[html_clean]
 nltk
+joblib
+scikit-learn

@@ -1,27 +1,43 @@
-// ✅ Updated: src/pages/InsightsPage.jsx
-import React from 'react';
+// frontend/src/pages/InsightsPage.jsx
+import React, { useEffect, useState } from 'react';
 import NewsFeed from '../components/NewsFeed';
 import { useSymbol } from '../components/SymbolContext';
-import { useStockData } from '../components/DataContext';
+import { getStockNews } from '../services/api';
 
 const InsightsPage = () => {
   const { symbol } = useSymbol();
-  const { data, loading } = useStockData();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    const run = async () => {
+      setLoading(true); setErr(null);
+      try {
+        const res = await getStockNews(symbol, { max: 30 });
+        if (!alive) return;
+        setItems(res.items || []);
+      } catch (e) {
+        if (!alive) return;
+        setErr(String(e));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+    run();
+    return () => { alive = false; };
+  }, [symbol]);
 
   return (
-    <div className="bg-white p-4 rounded shadow space-y-4">
-      <h2 className="text-2xl font-bold text-purple-700 mb-4 border-b pb-2">📰 News for {symbol}</h2>
-      <div className="rounded-xl border bg-white p-4 shadow-md hover:shadow-lg transition-all">
-        {loading ? (
-          <p className="text-sm text-gray-500">Loading news...</p>
-        ) : (
-          <NewsFeed articles={data.news || []} />
-        )}
-      </div>
-      {!loading && data.lastFetched && (
-        <p className="text-xs text-gray-400 text-right italic">
-          Last updated {Math.round((Date.now() - data.lastFetched) / 60000)} min ago
-        </p>
+    <div className="space-y-4">
+      <h2 className="text-2xl font-bold">News for {symbol}</h2>
+      {loading ? (
+        <div>Loading…</div>
+      ) : err ? (
+        <div className="text-red-600">{err}</div>
+      ) : (
+        <NewsFeed items={items} />
       )}
     </div>
   );
