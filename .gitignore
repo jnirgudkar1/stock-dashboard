@@ -1,4 +1,5 @@
 /backend/.env
+/backend/db/stocks.db
 /frontend/.env
 /frontwnd/.vite/
 /training_pipeline/.env

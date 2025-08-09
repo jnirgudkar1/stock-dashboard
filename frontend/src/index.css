@@ -371,9 +371,6 @@
   .border-gray-300 {
     border-color: var(--color-gray-300);
   }
-  .border-purple-200 {
-    border-color: var(--color-purple-200);
-  }
   .bg-blue-600 {
     background-color: var(--color-blue-600);
   }
@@ -480,9 +477,6 @@
     --tw-font-weight: var(--font-weight-semibold);
     font-weight: var(--font-weight-semibold);
   }
-  .text-blue-600 {
-    color: var(--color-blue-600);
-  }
   .text-blue-700 {
     color: var(--color-blue-700);
   }
@@ -503,9 +497,6 @@
   }
   .text-green-600 {
     color: var(--color-green-600);
-  }
-  .text-orange-600 {
-    color: var(--color-orange-600);
   }
   .text-purple-600 {
     color: var(--color-purple-600);
@@ -534,10 +525,6 @@
   }
   .shadow-md {
     --tw-shadow: 0 4px 6px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 2px 4px -2px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
-    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
-  }
-  .shadow-sm {
-    --tw-shadow: 0 1px 3px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 1px 2px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
   }
   .transition-all {
@@ -609,11 +596,6 @@
   .md\:grid-cols-4 {
     @media (width >= 48rem) {
       grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-  }
-  .dark\:bg-gray-800 {
-    @media (prefers-color-scheme: dark) {
-      background-color: var(--color-gray-800);
     }
   }
 }
