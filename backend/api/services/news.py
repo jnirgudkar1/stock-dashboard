@@ -1,91 +1,142 @@
 """
-news.py — unified news service
+news.py — unified news service with sentiment + impact scoring (no DB)
 
-Combines:
-- news_services.py (GNews search / listing)
-- news_crawler.py (fetch + extract article text)
-- summary_services.py (generate compact summaries)
-- sentiment_store.py (sentiment + optional caching)
+Exports:
+- search_news(query=None, symbol=None, *, max_items=20) -> list[dict]
+- fetch_and_cache_article_text(url) -> dict
 
-Design goals:
-- Single facade for all news needs used by the dashboard
-- Pluggable persistence: in‑memory by default; optional SQLite via backend/api/db/database.py if present
-- Headline impact scoring + sentiment in one place
-
-Public functions:
-- search_news(query: str | None = None, symbol: str | None = None, *, max_items: int = 20) -> list[dict]
-- fetch_and_cache_article_text(url: str) -> dict
-- summarize_text(text: str, max_sentences: int = 5) -> str
-- impact_score(item: dict) -> float
-- sentiment(text: str) -> dict
+Each news item:
+{
+  "title": str,
+  "url": str,
+  "source": str,
+  "published_at": int,   # epoch seconds
+  "description": str | None,
+  "sentiment": { "score": float[-1..1], "label": "positive|neutral|negative", "color": "green|yellow|red" },
+  "impact": "low|medium|high",
+  "impact_score": float, # 0..100
+}
 """
+
 from __future__ import annotations
 
 import os
 import re
 import time
-import html
-import json
-import math
-import typing as t
+from typing import Dict, Tuple
+
 import requests
-from urllib.parse import urlparse
 
-# Configuration (env)
-GNEWS_API_KEY = os.getenv("GNEWS_KEY") or os.getenv("GNEWS_API_KEY")
-GNEWS_BASE = "https://gnews.io/api/v4/search"
+# ---------------------------
+# Config
+# ---------------------------
 
-# Local in‑memory caches
-_search_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
-_article_cache: dict[str, tuple[float, dict]] = {}
-_CACHE_TTL_SEARCH = 60  # seconds
-_CACHE_TTL_ARTICLE = 3600  # seconds
+GNEWS_API_KEY = os.getenv("GNEWS_API_KEY") or os.getenv("GNEWS_KEY") or ""
+GNEWS_ENDPOINT = "https://gnews.io/api/v4/search"  # free tier supports search
 
-# --- Sentiment label/color mapping for UI ---
-def _label_color_from_score(score: float | None):
-    if score is None:
-        return ("unknown", "grey")
-    if score >= 0.2:
+_CACHE_TTL_SEARCH = int(os.getenv("NEWS_CACHE_TTL", "1800"))   # 30m
+_CACHE_TTL_ARTICLE = int(os.getenv("ARTICLE_CACHE_TTL", "86400"))  # 24h
+
+_search_cache: Dict[Tuple[str, int], Tuple[float, list[dict]]] = {}
+_article_cache: Dict[str, Tuple[float, dict]] = {}
+
+# ---------------------------
+# Utilities
+# ---------------------------
+
+def _label_color_from_score(score: float) -> tuple[str, str]:
+    """Map sentiment score [-1..1] to (label, color)."""
+    if score >= 0.15:
         return ("positive", "green")
-    if score <= -0.2:
+    if score <= -0.15:
         return ("negative", "red")
     return ("neutral", "yellow")
 
 
-# ---------------------------
-# Helpers: cache
-# ---------------------------
-
-def _cache_get(store: dict, key, ttl: int):
-    item = store.get(key)
-    if not item:
+def _cache_get(cache: dict, key, ttl: int):
+    ent = cache.get(key)
+    if not ent:
         return None
-    ts, value = item
-    if time.time() - ts > ttl:
-        return None
-    return value
-
-def _cache_set(store: dict, key, value):
-    store[key] = (time.time(), value)
+    ts, val = ent
+    return val if (time.time() - ts) <= ttl else None
 
 
-# ---------------------------
-# Helpers: parse/convert
-# ---------------------------
+def _cache_set(cache: dict, key, val):
+    cache[key] = (time.time(), val)
 
-def _iso8601_to_epoch(s: str | None) -> int:
-    if not s:
-        return 0
-    # gnews example: "2025-08-08T19:35:00Z"
-    try:
-        import datetime as dt
-        return int(dt.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
-    except Exception:
-        return 0
+
+def _extract_tickers(text: str) -> list[str]:
+    return re.findall(r"\b[A-Z]{2,5}\b", text or "")
 
 
 # ---------------------------
-# News search (GNews)
+# Sentiment (heuristic, no ML)
+# ---------------------------
+
+_POS = set("""beat beats beating surge surges bullish upgrade record rally rebound surge strong growth profit profits profitable upside raised raises
+outperform buy buys optimistic optimisticly optimism expand expanding expansion accelerate accelerating""".split())
+_NEG = set("""miss misses missed plunge plunges bearish downgrade lawsuit probe investigation fraud cut cuts cutting cutting cut guidance warning warns
+layoff layoffs decline declines declining weak weakness loss losses downside fear fears pessimistic slowdown slowing slump""".split())
+
+def sentiment(text: str) -> dict:
+    """
+    Very lightweight keyword-based sentiment -> score in [-1..1].
+    """
+    if not text:
+        return {"score": 0.0, "label": "neutral", "color": "yellow"}
+    toks = re.findall(r"[A-Za-z']+", text.lower())
+    pos = sum(1 for t in toks if t in _POS)
+    neg = sum(1 for t in toks if t in _NEG)
+    total = pos + neg
+    score = 0.0 if total == 0 else (pos - neg) / total
+    label, color = _label_color_from_score(score)
+    return {"score": round(score, 4), "label": label, "color": color}
+
+
+# ---------------------------
+# Impact score 0..1 (display as 0..100 on frontend)
+# ---------------------------
+
+_SRC_WEIGHTS = {
+    "reuters": 1.0, "bloomberg": 1.0, "wsj": 0.95, "financial times": 0.95,
+    "cnbc": 0.85, "marketwatch": 0.8, "seeking alpha": 0.7, "yahoo": 0.7
+}
+_KEYWORDS = [
+    "earnings","guidance","downgrade","upgrade","lawsuit",
+    "acquires","acquisition","merger","sec","cfo","partnership","bankruptcy"
+]
+
+def impact_score(item: dict) -> float:
+    """Blend recency, source weight, and sentiment into a single score in [0,1]."""
+    title = (item or {}).get("title") or ""
+    desc = (item or {}).get("description") or ""
+    ts = float((item or {}).get("published_at") or 0)
+
+    # Sentiment strength |score| (0..1)
+    s = sentiment(f"{title}. {desc}")
+    s_term = 0.5 * abs(s["score"])  # weight 0.5
+
+    # Recency decay (half-life 24h)
+    age = max(0.0, time.time() - ts)
+    decay = 0.5 ** (age / (24 * 3600.0))  # 1.0 at now, 0.5 after 24h ...
+    r_term = 0.35 * decay  # weight 0.35
+
+    # Source weight (0.6..1.0)
+    src = ((item or {}).get("source") or "").lower()
+    src_weight = max(0.6, _SRC_WEIGHTS.get(src, 0.7))
+    src_term = 0.10 * src_weight  # weight 0.10
+
+    # Keyword boost (0..0.05)
+    kw_lower = f"{title} {desc}".lower()
+    k = sum(1 for w in _KEYWORDS if w in kw_lower)
+    kw_term = 0.05 * min(1.0, k / 3.0)
+
+    score = s_term + r_term + src_term + kw_term
+    return max(0.0, min(1.0, score))
+
+
+# ---------------------------
+# Search news
 # ---------------------------
 
 def search_news(query: str | None = None, symbol: str | None = None, *, max_items: int = 20) -> list[dict]:
@@ -100,48 +151,70 @@ def search_news(query: str | None = None, symbol: str | None = None, *, max_item
         raise ValueError("Provide query or symbol")
 
     q = query or symbol
-    key = (q, max_items)
+    key = (q, int(max_items))
     cached = _cache_get(_search_cache, key, _CACHE_TTL_SEARCH)
-    if cached:
+    if cached is not None:
         return cached
 
     params = {
         "q": q,
-        "token": GNEWS_API_KEY,
         "lang": "en",
-        "max": min(max_items, 100),
+        "max": int(max_items),
+        "token": GNEWS_API_KEY,
+        "sortby": "publishedAt",
     }
-
-    r = requests.get(GNEWS_BASE, params=params, timeout=20)
+    r = requests.get(GNEWS_ENDPOINT, params=params, timeout=10)
     r.raise_for_status()
-    payload = r.json()
+    data = r.json()
 
+    articles = (data or {}).get("articles", []) or []
     items: list[dict] = []
-    for art in payload.get("articles", [])[:max_items]:
+    for a in articles[: int(max_items)]:
+        # Normalize
+        title = a.get("title") or ""
+        url = a.get("url") or ""
+        source = ((a.get("source") or {}).get("name") or "").strip()
+        desc = a.get("description") or ""
+        # gnews uses RFC3339 in 'publishedAt'
+        published_at = a.get("publishedAt") or a.get("published_at") or ""
+        # parse to epoch
+        ts = _parse_iso_to_epoch(published_at)
+
         base = {
-            "title": art.get("title"),
-            "source": (art.get("source") or {}).get("name"),
-            "published_at": _iso8601_to_epoch(art.get("publishedAt")),
-            "url": art.get("url"),
-            "description": art.get("description"),
-            "tickers": _extract_tickers(art.get("title") or "") or None,
+            "title": title,
+            "url": url,
+            "source": source,
+            "published_at": ts,
+            "description": desc,
         }
-        # Enrich with sentiment + impact (server-side)
-        text_for_sent = f"{base['title'] or ''}. {base['description'] or ''}"
-        s = sentiment(text_for_sent)
-        label, color = _label_color_from_score(s.get("score"))
-        base["sentiment"] = {
-            "score": float(s.get("score", 0.0)),
-            "label": label,
-            "color": color,
-        }
-        # impact_score -> 0..1 (higher = more impactful)
-        imp = impact_score(base)
+        # sentiment + impact
+        s = sentiment(f"{title}. {desc}")
+        base["sentiment"] = s
+        imp = impact_score(base)  # 0..1
+        base["impact_score"] = round(imp * 100.0, 1)
         base["impact"] = ("high" if imp >= 0.66 else "medium" if imp >= 0.4 else "low")
         items.append(base)
 
     _cache_set(_search_cache, key, items)
     return items
+
+
+def _parse_iso_to_epoch(s: str) -> int:
+    # Try several formats quickly without bringing heavy deps
+    if not s:
+        return 0
+    try:
+        # 2023-10-05T14:30:00Z or with offset
+        import datetime as _dt
+        try:
+            dt = _dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            # Fallback RFC2822 style
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(s)
+        return int(dt.timestamp())
+    except Exception:
+        return 0
 
 
 # ---------------------------
@@ -151,159 +224,39 @@ def search_news(query: str | None = None, symbol: str | None = None, *, max_item
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/120.0.0.0 Safari/537.36"
+    "Chrome/120 Safari/537.36"
 )
 
-
 def fetch_and_cache_article_text(url: str) -> dict:
-    """Fetch an article and return { 'url', 'title', 'text' }.
-
-    Uses local cache; attempts very light extraction heuristics to avoid heavy deps.
-    If the site blocks scraping or returns non-HTML, the text may be blank.
-    """
+    if not url:
+        raise ValueError("url required")
     cached = _cache_get(_article_cache, url, _CACHE_TTL_ARTICLE)
-    if cached:
+    if cached is not None:
         return cached
 
     try:
-        headers = {"User-Agent": _USER_AGENT, "Accept": "text/html,*/*"}
-        resp = requests.get(url, headers=headers, timeout=20)
-        resp.raise_for_status()
-        html_text = resp.text
-    except Exception:
-        html_text = ""
-
-    title = _extract_title(html_text) or _domain_from_url(url)
-    text = _extract_main_text(html_text)
-
-    result = {"url": url, "title": title, "text": text}
-    _cache_set(_article_cache, url, result)
-    return result
+        r = requests.get(url, headers={"User-Agent": _USER_AGENT, "Accept": "text/html"}, timeout=10)
+        r.raise_for_status()
+        html = r.text
+        text = _html_to_text(html)
+        out = {"url": url, "text": text[:20000]}
+        _cache_set(_article_cache, url, out)
+        return out
+    except Exception as e:
+        raise RuntimeError(f"failed to fetch article: {e}")
 
 
-def _domain_from_url(u: str) -> str:
-    try:
-        return urlparse(u).netloc
-    except Exception:
-        return ""
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+def _html_to_text(html: str) -> str:
+    txt = _TAG_RE.sub(" ", html or "")
+    txt = _WS_RE.sub(" ", txt)
+    return txt.strip()
 
 
 # ---------------------------
-# Lightweight HTML extraction
-# ---------------------------
-
-def _extract_title(html_text: str) -> str:
-    if not html_text:
-        return ""
-    m = re.search(r"<title[^>]*>(.*?)</title>", html_text, re.IGNORECASE | re.DOTALL)
-    if not m:
-        return ""
-    return html.unescape(m.group(1)).strip()
-
-
-def _extract_main_text(html_text: str) -> str:
-    if not html_text:
-        return ""
-    # Remove scripts/styles
-    html_no_code = re.sub(r"<(script|style)[^>]*>.*?</\\1>", " ", html_text, flags=re.IGNORECASE | re.DOTALL)
-    # Strip tags
-    text = re.sub(r"<[^>]+>", " ", html_no_code)
-    # Collapse whitespace
-    text = re.sub(r"\s+", " ", text)
-    return html.unescape(text).strip()
-
-
-def _extract_tickers(text: str) -> list[str]:
-    # Very light $TSLA / (NASDAQ:AAPL) patterns
-    tickers: set[str] = set()
-    for m in re.finditer(r"\$([A-Z]{1,5})\b", text):
-        tickers.add(m.group(1))
-    for m in re.finditer(r"\((?:NASDAQ|NYSE|AMEX):([A-Z]{1,5})\)", text):
-        tickers.add(m.group(1))
-    return sorted(tickers)
-
-
-# ---------------------------
-# Sentiment (heuristic, free)
-# ---------------------------
-
-_POS_WORDS = {
-    "beat", "beats", "beating", "surge", "surged", "record", "growth", "rally",
-    "upgrade", "upgrades", "outperform", "raise", "raises", "profit", "profits",
-    "strong", "bullish", "optimism", "optimistic", "win", "wins", "winning",
-    "expand", "expansion", "contract win", "innovation", "breakthrough",
-    "guidance raise", "forecast beat", "revenue beat", "eps beat",
-    "approval", "milestone", "partnership", "contract",
-}
-
-_NEG_WORDS = {
-    "miss", "misses", "missing", "fall", "falls", "fell", "drop", "dropped", "decline",
-    "downgrade", "downgrades", "underperform", "cut", "cuts", "cutting",
-    "loss", "losses", "lawsuit", "probe", "investigation", "fraud",
-    "weak", "bearish", "warning", "recall", "delay", "delays",
-    "guidance cut", "profit warning",
-}
-
-_NEUTRAL_BOOST = {
-    "ai", "iphone", "merger", "acquisition", "deal", "agreement", "launch", "product",
-    "expansion", "partnership", "contract", "approval", "milestone", "breakthrough",
-}
-
-
-def sentiment(text: str) -> dict:
-    """Ultra-light sentiment heuristic (free, no external models).
-
-    Returns {score: -1..1, pos: int, neg: int, words: int}
-    """
-    if not text:
-        return {"score": 0.0, "pos": 0, "neg": 0, "words": 0}
-
-    tokens = re.findall(r"[A-Za-z']+", text.lower())
-    words = len(tokens)
-    pos = sum(1 for t in tokens if t in _POS_WORDS)
-    neg = sum(1 for t in tokens if t in _NEG_WORDS)
-    neutral = sum(1 for t in tokens if t in _NEUTRAL_BOOST)
-
-    raw = pos - neg
-    # Mildly dampen negatives that include neutral/business-y words
-    raw += 0.25 * neutral
-
-    # Squash to [-1, 1] with tanh
-    score = math.tanh(raw / 3.0)
-    return {"score": score, "pos": pos, "neg": neg, "words": words}
-
-
-# ---------------------------
-# Impact scoring (0..1)
-# ---------------------------
-
-def impact_score(item: dict) -> float:
-    """Headline impact score blends recency, source presence, and sentiment of title/desc.
-
-    0..1 where higher is more impactful.
-    """
-    title = (item or {}).get("title") or ""
-    desc = (item or {}).get("description") or ""
-    ts = (item or {}).get("published_at") or 0
-
-    # Sentiment from title + description
-    s = sentiment(f"{title}. {desc}")
-
-    # Recency decay: within 24h ≈ 1.0, then decays
-    age = max(0, time.time() - ts)
-    # 24h half-life
-    decay = 0.5 ** (age / 86400)
-
-    # Source weight if present
-    src_weight = 1.0 if item.get("source") else 0.9
-
-    # Combine (bounded)
-    raw = (0.6 * ((s["score"] + 1) / 2)) + (0.3 * decay) + (0.1 * src_weight)
-    return max(0.0, min(1.0, raw))
-
-
-# ---------------------------
-# Summarization (extractive)
+# Summarization (extractive, optional)
 # ---------------------------
 
 def summarize_text(text: str, max_sentences: int = 5) -> str:
@@ -311,17 +264,14 @@ def summarize_text(text: str, max_sentences: int = 5) -> str:
     Very light extractive summarization:
     - sentence split
     - keyword frequency scoring
-    - pick top N sentences (order preserved)
-    This is intentionally simple to avoid heavy dependencies.
+    - take top-N sentences
     """
     if not text:
         return ""
-
     sentences = re.split(r"(?<=[.!?])\s+", text.strip())
     if len(sentences) <= max_sentences:
         return text.strip()
 
-    # Keyword scoring
     tokens = re.findall(r"[A-Za-z']+", text.lower())
     freq: dict[str, int] = {}
     for tkn in tokens:
@@ -329,8 +279,11 @@ def summarize_text(text: str, max_sentences: int = 5) -> str:
 
     def score_sentence(s: str) -> float:
         toks = re.findall(r"[A-Za-z']+", s.lower())
-        return sum(freq.get(t, 0) for t in toks)
+        return sum(freq.get(t, 0) for t in toks) / (len(toks) + 1e-6)
 
-    ranked = sorted(((i, s, score_sentence(s)) for i, s in enumerate(sentences)), key=lambda x: x[2], reverse=True)
-    top = sorted(ranked[:max_sentences], key=lambda x: x[0])
-    return " ".join(s for _, s, _ in top)
+    # pick top sentences, keep original order
+    ranked = sorted([(i, score_sentence(s)) for i, s in enumerate(sentences)], key=lambda x: x[1], reverse=True)
+    keep_idx = set(i for i, _ in ranked[:max_sentences])
+    kept = [s for i, s in enumerate(sentences) if i in keep_idx]
+    return " ".join(kept)
+    return " ".join(kept)

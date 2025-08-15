@@ -1,66 +1,162 @@
-# stock-dashboard
-Lets start with the basics
-
-Project structure:
-investment-dashboard/
-├── frontend/
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.js
-│   ├── postcss.config.js
-│   ├── tailwind.config.js
-│   ├── input.css
-│   └── src/
-│       ├── main.jsx
-│       ├── App.jsx
-│       ├── index.css
-│       ├── components/
-│       │   ├── SymbolContext.jsx
-│       │   ├── SymbolSelector.jsx
-│       │   ├── AssetChart.jsx
-│       │   ├── AssetSummary.jsx
-│       │   ├── AssetMetadata.jsx
-│       │   ├── AssetTabs.jsx
-│       │   ├── NewsFeed.jsx
-│       │   └── Navigation.jsx
-│       ├── pages/
-│       │   ├── DashboardPage.jsx
-│       │   ├── InsightsPage.jsx
-│       │   ├── PortfolioPage.jsx
-│       │   └── ValuationPage.jsx
-│       └── services/
-│           └── API.js
-│
-├── backend/
-│   ├── main.py
-│   ├── requirements.txt
-│   ├── .env.example
-│   └── api/
-│       ├── __init__.py
-│       ├── routes.py
-│       └── services/
-│           ├── price_services.py
-│           ├── news_services.py
-│           └── summary_services.py
-│
-├── .gitignore
-├── README.md
-└── run_all_tests.sh
-├── training_pipeline/
-    ├── data/
-    │   ├── historical_prices/          # Daily stock prices per symbol
-    │   ├── fundamentals.csv            # PE, EPS, revenue growth
-    │   └── training_data.csv           # Merged, labeled dataset
-    ├── models/
-    │   └── price_direction_model.pkl   # Trained model file
-    ├── fetch/
-    │   ├── fetch_prices.py             # Downloads historical price data
-    │   └── fetch_fundamentals.py       # Downloads fundamentals via Finnhub
-    ├── process/
-    │   └── build_training_set.py       # Joins + labels dataset for training
-    └── train/
-        ├── train_model.py              # Trains and saves the model
-        └── predict_direction.py        # CLI tool to test predictions
+/mnt/data/stock-dashboard
+├── __MACOSX
+│   └── stock-dashboard
+│       ├── backend
+│       │   ├── api
+│       │   │   ├── db
+│       │   │   ├── services
+│       │   │   ├── ._.DS_Store
+│       │   │   ├── .___init__.py
+│       │   │   ├── ._db
+│       │   │   ├── ._routes.py
+│       │   │   └── ._services
+│       │   ├── ._.DS_Store
+│       │   ├── ._api
+│       │   ├── ._main.py
+│       │   └── ._requirement.txt
+│       ├── frontend
+│       │   ├── public
+│       │   │   └── ._vite.svg
+│       │   ├── src
+│       │   │   ├── assets
+│       │   │   ├── components
+│       │   │   ├── pages
+│       │   │   ├── services
+│       │   │   ├── ._App.css
+│       │   │   ├── ._App.jsx
+│       │   │   ├── ._assets
+│       │   │   ├── ._components
+│       │   │   ├── ._index.css
+│       │   │   ├── ._input.css
+│       │   │   ├── ._main.jsx
+│       │   │   ├── ._pages
+│       │   │   └── ._services
+│       │   ├── ._.DS_Store
+│       │   ├── ._eslint.config.js
+│       │   ├── ._index.html
+│       │   ├── ._package-lock.json
+│       │   ├── ._package.json
+│       │   ├── ._public
+│       │   ├── ._README.md
+│       │   ├── ._src
+│       │   ├── ._tailwind.config.js
+│       │   └── ._vite.config.js
+│       ├── training_pipeline
+│       │   ├── data
+│       │   │   ├── historical_prices
+│       │   │   ├── ._fundamentals.csv
+│       │   │   ├── ._historical_prices
+│       │   │   └── ._training_data.csv
+│       │   ├── fetch
+│       │   │   ├── ._fetch_fundamentals.py
+│       │   │   └── ._fetch_prices.py
+│       │   ├── models
+│       │   │   └── ._price_direction_model.pkl
+│       │   ├── process
+│       │   │   └── ._build_training_set.py
+│       │   ├── train
+│       │   │   ├── ._predict_direction.py
+│       │   │   └── ._train_model.py
+│       │   ├── utils
+│       │   │   └── ._sentiment_store.py
+│       │   ├── ._.DS_Store
+│       │   ├── ._.env
+│       │   ├── ._data
+│       │   ├── ._fetch
+│       │   ├── ._models
+│       │   ├── ._process
+│       │   ├── ._train
+│       │   └── ._utils
+│       ├── ._.DS_Store
+│       ├── ._backend
+│       ├── ._frontend
+│       ├── ._README.md
+│       └── ._training_pipeline
+└── stock-dashboard
+    ├── backend
+    │   ├── api
+    │   │   ├── db
+    │   │   │   ├── .DS_Store
+    │   │   │   └── database.py
+    │   │   ├── services
+    │   │   │   ├── .DS_Store
+    │   │   │   ├── __init__.py
+    │   │   │   ├── metadata_services.py
+    │   │   │   ├── news.py
+    │   │   │   ├── prices.py
+    │   │   │   └── valuation.py
+    │   │   ├── .DS_Store
+    │   │   ├── __init__.py
+    │   │   └── routes.py
+    │   ├── .DS_Store
+    │   ├── main.py
+    │   └── requirement.txt
+    ├── frontend
+    │   ├── public
+    │   │   └── vite.svg
+    │   ├── src
+    │   │   ├── assets
+    │   │   │   └── react.svg
+    │   │   ├── components
+    │   │   │   ├── AssetChart.jsx
+    │   │   │   ├── DataContext.jsx
+    │   │   │   ├── Navigation.jsx
+    │   │   │   ├── NewsFeed.jsx
+    │   │   │   ├── SymbolContext.jsx
+    │   │   │   ├── SymbolSelector.jsx
+    │   │   │   └── ValuationResult.jsx
+    │   │   ├── pages
+    │   │   │   ├── DashboardPage.jsx
+    │   │   │   ├── InsightsPage.jsx
+    │   │   │   ├── PortfolioPage.jsx
+    │   │   │   └── ValuationPage.jsx
+    │   │   ├── services
+    │   │   │   └── api.js
+    │   │   ├── App.css
+    │   │   ├── App.jsx
+    │   │   ├── index.css
+    │   │   ├── input.css
+    │   │   └── main.jsx
+    │   ├── .DS_Store
+    │   ├── eslint.config.js
+    │   ├── index.html
+    │   ├── package-lock.json
+    │   ├── package.json
+    │   ├── README.md
+    │   ├── tailwind.config.js
+    │   └── vite.config.js
+    ├── training_pipeline
+    │   ├── data
+    │   │   ├── historical_prices
+    │   │   │   ├── .DS_Store
+    │   │   │   ├── AAPL.csv
+    │   │   │   ├── AMD.csv
+    │   │   │   ├── AMZN.csv
+    │   │   │   ├── BKSY.csv
+    │   │   │   ├── GOOGL.csv
+    │   │   │   ├── NVDA.csv
+    │   │   │   ├── PLTR.csv
+    │   │   │   ├── RCAT.csv
+    │   │   │   ├── RKLB.csv
+    │   │   │   └── TSLA.csv
+    │   │   ├── fundamentals.csv
+    │   │   └── training_data.csv
+    │   ├── fetch
+    │   │   ├── fetch_fundamentals.py
+    │   │   └── fetch_prices.py
+    │   ├── models
+    │   │   └── price_direction_model.pkl
+    │   ├── process
+    │   │   └── build_training_set.py
+    │   ├── train
+    │   │   ├── predict_direction.py
+    │   │   └── train_model.py
+    │   ├── utils
+    │   │   └── sentiment_store.py
+    │   ├── .DS_Store
+    │   └── .env
+    ├── .DS_Store
+    └── README.md
     
     
 # 1. Fetch historical prices (2015–today)
