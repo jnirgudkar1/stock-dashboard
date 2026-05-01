@@ -31,7 +31,7 @@ def fetch_fundamentals(symbol):
         return None
 
 if __name__ == "__main__":
-    symbols = ["AAPL", "GOOGL", "NVDA", "RKLB", "RCAT", "BKSY", "AMD", "TSLA", "PLTR", "AMZN"]
+    symbols = ["AAPL", "GOOGL", "NVDA", "RKLB", "RCAT", "BKSY", "AMD", "TSLA", "PLTR", "AMZN", "UNH", "RDW", "LHX", "HPE"]
     results = []
 
     for symbol in symbols:

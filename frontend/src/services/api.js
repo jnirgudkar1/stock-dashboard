@@ -139,3 +139,9 @@ export function toRechartsSeries(normalized) {
     };
   });
 }
+
+// ---- PaperTrades ----
+export async function getPaperTrade(symbol, opts = {}) {
+  const { budget = 1000, horizon_days = 7, temp } = opts || {};
+  return getJSON(`/papertrade/${encodeURIComponent(symbol)}${qs({ budget, horizon_days, temp })}`);
+}

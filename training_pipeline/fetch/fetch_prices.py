@@ -18,5 +18,5 @@ def fetch_price_history(symbol, start="2015-01-01", end=None):
     print(f"Saved {symbol} price data from {start} to {end}")
 
 # Example: run for a few stocks
-for symbol in ["AAPL", "GOOGL", "NVDA", "RKLB", "RCAT", "BKSY", "AMD", "TSLA", "PLTR", "AMZN"]:
+for symbol in ["AAPL", "GOOGL", "NVDA", "RKLB", "RCAT", "BKSY", "AMD", "TSLA", "PLTR", "AMZN", "UNH", "RDW", "LHX", "HPE"]:
     fetch_price_history(symbol)

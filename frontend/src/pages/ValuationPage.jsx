@@ -1,7 +1,7 @@
 // frontend/src/pages/ValuationPage.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSymbol } from '../components/SymbolContext';
-import { getValuation, getPrediction } from '../services/api';
+import { getValuation, getPrediction, getPaperTrade } from '../services/api';
 import ValuationResult from '../components/ValuationResult';
 
 function pct(x, digits = 1) { if (typeof x !== 'number' || Number.isNaN(x)) return '—'; return `${(x * 100).toFixed(digits)}%`; }
@@ -103,27 +103,21 @@ const PredictionCard = ({ pred }) => {
 
 const DEV = typeof import.meta !== 'undefined' && import.meta.env && !!import.meta.env.DEV;
 
-// NEW: one-line decision banner
 const DecisionStrip = ({ pred, val }) => {
   if (!pred) return null;
   const p = Number(pred.prob_up);
   const conf = Math.abs(p - 0.5) * 2; // 0..1
   const base = p >= 0.6 ? 'Buy' : p <= 0.4 ? 'Sell' : 'Hold';
   const valVerdict = (val?.verdict || '').trim();
-
-  // If valuation conflicts and confidence isn't strong, neutralize to Hold
   let suggestion = base;
   const conflict = (base === 'Buy' && valVerdict === 'Sell') || (base === 'Sell' && valVerdict === 'Buy');
   if (conflict && conf < 0.4) suggestion = 'Hold';
-
   const cls =
     suggestion === 'Buy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
     suggestion === 'Sell' ? 'bg-rose-50 text-rose-700 border-rose-200' :
     'bg-amber-50 text-amber-700 border-amber-200';
-
   const reason = `Model: Prob↑ ${pct(p)}${pred?.calibration?.applied ? ` (T=${fmt(pred?.calibration?.temperature, 2)})` : ''}` +
     (valVerdict ? ` · Valuation: ${valVerdict}` : '');
-
   return (
     <div className={`p-3 rounded-2xl border ${cls} flex flex-wrap items-center gap-3`}>
       <div className="font-semibold">Suggestion: {suggestion}</div>
@@ -140,18 +134,8 @@ const DevTempControl = ({ value, onChange }) => {
         <div className="font-medium">Calibration Temperature</div>
         <div className="text-sm text-gray-600">T = {fmt(value, 2)}</div>
       </div>
-      <input
-        type="range"
-        min="0.50"
-        max="2.00"
-        step="0.05"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full"
-      />
-      <div className="text-xs text-gray-500 mt-1">
-        Lower T (&lt;1) → sharper (more confident). Higher T (&gt;1) → flatter (less confident).
-      </div>
+      <input type="range" min="0.50" max="2.00" step="0.05" value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-full" />
+      <div className="text-xs text-gray-500 mt-1">Lower T (&lt;1) → sharper. Higher T (&gt;1) → flatter.</div>
     </div>
   );
 };
@@ -162,9 +146,7 @@ const ValuationPage = () => {
   const [pred, setPred] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
-
-  // Dev-only temp slider state
-  const [temp, setTemp] = useState(1.0);
+  const [temp, setTemp] = useState(1.0); // dev
 
   useEffect(() => {
     let alive = true;
@@ -173,7 +155,6 @@ const ValuationPage = () => {
       setErr(null);
       try {
         const vPromise = getValuation(symbol);
-        // pass temp only in dev; in prod the backend default env PREDICT_TEMP is used
         const pPromise = DEV ? getPrediction(symbol, { temp }) : getPrediction(symbol);
         const [v, p] = await Promise.allSettled([vPromise, pPromise]);
         if (!alive) return;
@@ -190,7 +171,20 @@ const ValuationPage = () => {
     };
     run();
     return () => { alive = false; };
-  }, [symbol, temp]); // re-run when temperature changes
+  }, [symbol, temp]);
+
+  const onAutoJournal = async () => {
+    try {
+      const trade = await getPaperTrade(symbol, { budget: 1000, horizon_days: 7, auto_store: true });
+      if (!trade || trade.action !== 'BUY') {
+        alert('No trade placed (SKIP). Conviction below threshold.');
+        return;
+      }
+      alert(`Stored: BUY ${trade.shares} ${trade.symbol} @ $${trade.entry_price} (id ${trade.trade_id})`);
+    } catch (e) {
+      alert(`Auto-journal failed: ${e?.message || e}`);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto p-4 space-y-6">
@@ -201,16 +195,23 @@ const ValuationPage = () => {
 
       {DEV && <DevTempControl value={temp} onChange={setTemp} />}
 
-      {loading && (
-        <div className="p-4 bg-gray-50 rounded-xl text-sm text-gray-600">Loading valuation & prediction…</div>
-      )}
-      {err && (
-        <div className="p-4 bg-rose-50 text-rose-700 rounded-xl text-sm">{err}</div>
-      )}
+      {loading && (<div className="p-4 bg-gray-50 rounded-xl text-sm text-gray-600">Loading valuation & prediction…</div>)}
+      {err && (<div className="p-4 bg-rose-50 text-rose-700 rounded-xl text-sm">{err}</div>)}
+
       {!loading && !err && (
         <>
-          {/* NEW: one-line decision banner */}
-          {pred && <DecisionStrip pred={pred} val={val} />}
+          {pred && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <DecisionStrip pred={pred} val={val} />
+              <button
+                onClick={onAutoJournal}
+                className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+                title="Use valuation + prediction to size and persist a paper trade"
+              >
+                Auto-journal trade
+              </button>
+            </div>
+          )}
 
           {val && <ValuationResult data={val} />}
           {pred && <PredictionCard pred={pred} />}

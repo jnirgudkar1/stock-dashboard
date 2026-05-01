@@ -2,7 +2,7 @@
 import React from 'react';
 import { useSymbol } from './SymbolContext';
 
-const assetOptions = ["AAPL", "GOOGL", "NVDA", "RKLB", "RCAT", "BKSY", "AMD", "TSLA", "PLTR", "AMZN", "BBAI"];
+const assetOptions = ["AAPL", "GOOGL", "NVDA", "RKLB", "RCAT", "BKSY", "AMD", "TSLA", "PLTR", "AMZN", "BBAI", "UNH", "HPE"];
 
 const SymbolSelector = () => {
   const { symbol, setSymbol } = useSymbol();
