@@ -17,19 +17,24 @@ from typing import Dict, List, Tuple
 
 from .prices import get_prices
 from .news import search_news
+from .. import save_cache, load_cache
 
-# -------------------------
-# Config (env overrides)
-# -------------------------
+# Configuration
 FEATURES_CACHE_TTL = int(os.getenv("FEATURES_CACHE_TTL", "600"))  # 10 minutes
 DEFAULT_INTERVAL = os.getenv("FEATURES_INTERVAL", "1day")
 DEFAULT_LIMIT = int(os.getenv("FEATURES_PRICE_LIMIT", "240"))     # enough for 26/20/21-day windows
 DEFAULT_MAX_NEWS = int(os.getenv("FEATURES_MAX_NEWS", "50"))
 
-# -------------------------
 # In-memory cache
-# -------------------------
 _cache: Dict[Tuple[str, str, int, int], Tuple[float, dict]] = {}
+
+# Load persistent cache on startup
+try:
+    _persisted = load_cache("features")
+    for key, (ts, data) in _persisted.items():
+        _cache[key] = (ts, data)
+except Exception:
+    pass
 
 def _cache_get(key: Tuple[str, str, int, int]):
     ent = _cache.get(key)
@@ -42,10 +47,13 @@ def _cache_get(key: Tuple[str, str, int, int]):
 
 def _cache_set(key: Tuple[str, str, int, int], val: dict):
     _cache[key] = (time.time(), val)
+    # Persist to disk
+    try:
+        save_cache("features", _cache)
+    except Exception:
+        pass  # Log silently - caching failure shouldn't crash the app
 
-# -------------------------
-# Math helpers
-# -------------------------
+
 def _sma(values: List[float], n: int) -> float | None:
     if len(values) < n:
         return None
@@ -117,9 +125,7 @@ def _pct(a: float, b: float) -> float | None:
         return None
     return (a / b) - 1.0
 
-# -------------------------
-# Public: get_features
-# -------------------------
+
 def get_features(symbol: str, interval: str = DEFAULT_INTERVAL, limit: int = DEFAULT_LIMIT, max_news: int = DEFAULT_MAX_NEWS) -> dict:
     """
     Build a compact features dict from prices + news.

@@ -11,8 +11,10 @@ import os
 import time
 import typing as t
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 import requests
+
+from .. import save_cache, load_cache
 
 ALPHA_VANTAGE_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 TWELVE_DATA_KEY = os.getenv("TWELVE_DATA_KEY")
@@ -23,9 +25,9 @@ TWELVE_DATA_BASE = "https://api.twelvedata.com/time_series"
 FINNHUB_BASE = "https://finnhub.io/api/v1/stock/candle"
 
 CACHE_TTL = int(os.getenv("PRICE_CACHE_TTL", "60"))
-
 PROVIDER_ORDER = ["alpha_vantage", "twelve_data", "finnhub"]
 
+# Interval mappings for different providers
 _INTERVAL_MAP = {
     "1min": {"alpha": "1min", "twelve": "1min", "finnhub": "1"},
     "5min": {"alpha": "5min", "twelve": "5min", "finnhub": "5"},
@@ -40,7 +42,22 @@ class _CacheItem:
     data: dict
     ts: float
 
+# Load cache from disk on startup (for persistence across restarts)
 _cache: dict[tuple, _CacheItem] = {}
+
+def _init_cache():
+    """Initialize cache from disk."""
+    global _cache
+    try:
+        persisted = load_cache("prices")
+        # Convert loaded data back to _CacheItem format
+        for key, (ts, data) in persisted.items():
+            _cache[key] = _CacheItem(data=data, ts=ts)
+    except Exception:
+        pass
+
+_init_cache()
+
 
 def _mem_get(key: tuple) -> t.Optional[dict]:
     item = _cache.get(key)
@@ -53,9 +70,14 @@ def _mem_get(key: tuple) -> t.Optional[dict]:
 
 def _mem_set(key: tuple, data: dict) -> None:
     _cache[key] = _CacheItem(data=data, ts=time.time())
+    # Persist to disk immediately after caching
+    try:
+        persisted = {k: (v.ts, v.data) for k, v in _cache.items()}
+        save_cache("prices", persisted)
+    except Exception:
+        pass  # Log silently - caching failure shouldn't crash the app
 
 
-# ---------------- Public API ----------------
 class PriceServiceError(Exception):
     pass
 
@@ -100,7 +122,6 @@ def get_prices(symbol: str, *, interval: str = "1day", limit: int = 100) -> dict
     raise PriceServiceError(f"All providers failed for {symbol} ({interval}). Last error: {last_err}")
 
 
-# ------------- Provider adapters -------------
 def _from_alpha_vantage(symbol: str, interval: str, limit: int) -> dict:
     if not ALPHA_VANTAGE_KEY:
         raise PriceServiceError("Missing ALPHA_VANTAGE_KEY")

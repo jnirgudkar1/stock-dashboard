@@ -4,6 +4,7 @@ routes.py — unified API routes using merged services, plus paper-trade & file 
 from __future__ import annotations
 
 import time
+from functools import wraps
 from fastapi import APIRouter, HTTPException, Query
 
 # Existing services
@@ -19,66 +20,64 @@ from .services.papertrade import suggest_trade
 
 router = APIRouter()
 
-# ---------------- Startup ----------------
+# Error handling decorator for consistent error responses
+def handle_service_error(service_name: str):
+    """Decorator to handle service errors consistently."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"{service_name} error: {e}")
+        return wrapper
+    return decorator
+
+
+# Startup event
 @router.on_event("startup")
 def _startup():
     preload()
 
-# ---------------- Core stock endpoints (existing) ----------------
 @router.get("/stocks/{symbol}/prices")
+@handle_service_error("Prices")
 def api_prices(symbol: str, interval: str = Query("1day"), limit: int = Query(100, ge=1, le=5000)):
-    try:
-        return get_prices(symbol.upper(), interval=interval, limit=limit)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Prices error: {e}")
+    return get_prices(symbol.upper(), interval=interval, limit=limit)
 
 @router.get("/stocks/{symbol}/metadata")
+@handle_service_error("Metadata")
 def api_metadata(symbol: str):
-    try:
-        data = get_metadata(symbol.upper())
-        if not data:
-            raise HTTPException(status_code=404, detail="No metadata")
-        return data
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Metadata error: {e}")
+    data = get_metadata(symbol.upper())
+    if not data:
+        raise HTTPException(status_code=404, detail="No metadata")
+    return data
 
 @router.get("/stocks/{symbol}/news")
+@handle_service_error("News")
 def api_stock_news(symbol: str, max_items: int = Query(25, ge=1, le=100)):
-    try:
-        return search_news(symbol.upper(), max_items=max_items)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"News error: {e}")
+    return search_news(symbol.upper(), max_items=max_items)
 
 @router.get("/news/search")
+@handle_service_error("News search")
 def api_search_news(q: str = Query(""), max_items: int = Query(25, ge=1, le=100)):
-    try:
-        return search_news(q, max_items=max_items)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"News search error: {e}")
+    return search_news(q, max_items=max_items)
 
 @router.get("/news/article")
+@handle_service_error("Article fetch")
 def api_article(url: str = Query(..., description="Article URL")):
-    try:
-        # returns { url, text, words, cached }
-        return fetch_and_cache_article_text(url)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Article fetch error: {e}")
+    return fetch_and_cache_article_text(url)
 
 @router.get("/stocks/{symbol}/features")
+@handle_service_error("Features")
 def api_features(symbol: str, interval: str = Query("1day"), limit: int = Query(240, ge=10, le=5000), max_news: int = Query(50, ge=0, le=200)):
-    try:
-        return get_features(symbol.upper(), interval=interval, limit=limit, max_news=max_news)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Features error: {e}")
+    return get_features(symbol.upper(), interval=interval, limit=limit, max_news=max_news)
 
 @router.get("/stocks/{symbol}/valuation")
+@handle_service_error("Valuation")
 def api_valuation(symbol: str):
-    try:
-        return score_valuation(symbol.upper())
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Valuation error: {e}")
+    return score_valuation(symbol.upper())
 
 @router.get("/stocks/{symbol}/predict")
 def api_predict(
@@ -92,8 +91,8 @@ def api_predict(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Prediction error: {e}")
 
-# ---------------- Paper-trade + portfolio (new) ----------------
 @router.get("/papertrade/{symbol}")
+@handle_service_error("Papertrade")
 def api_papertrade(
     symbol: str,
     budget: float = Query(1000.0, ge=50, le=100000),
@@ -101,60 +100,53 @@ def api_papertrade(
     temp: float | None = Query(None, ge=0.2, le=5.0),
     auto_store: bool = Query(True),
 ):
-    try:
-        out = suggest_trade(symbol=symbol.upper(), budget=budget, horizon_days=horizon_days, temp=temp)
-        if auto_store and out.get("action") == "BUY":
-            now = int(time.time())
-            trade = {
-                "id": f"{out['symbol']}-{now}",
-                "symbol": out["symbol"],
-                "side": "BUY",
-                "shares": int(out["shares"]),
-                "entry_price": float(out["entry_price"]),
-                "notional": float(out["notional"]),
-                "opened_at": now,
-                "horizon_days": int(out["horizon_days"]),
-                "status": "OPEN",
-                "rationale": out.get("rationale", {}),
-            }
-            append_trade(trade)
-            out["stored"] = True
-            out["trade_id"] = trade["id"]
-        return out
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Papertrade error: {e}")
+    out = suggest_trade(symbol=symbol.upper(), budget=budget, horizon_days=horizon_days, temp=temp)
+    if auto_store and out.get("action") == "BUY":
+        now = int(time.time())
+        trade = {
+            "id": f"{out['symbol']}-{now}",
+            "symbol": out["symbol"],
+            "side": "BUY",
+            "shares": int(out["shares"]),
+            "entry_price": float(out["entry_price"]),
+            "notional": float(out["notional"]),
+            "opened_at": now,
+            "horizon_days": int(out["horizon_days"]),
+            "status": "OPEN",
+            "rationale": out.get("rationale", {}),
+        }
+        append_trade(trade)
+        out["stored"] = True
+        out["trade_id"] = trade["id"]
+    return out
 
 @router.get("/portfolio/trades")
+@handle_service_error("List trades")
 def api_trades_list():
-    try:
-        return {"items": load_trades()}
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"List trades error: {e}")
+    return {"items": load_trades()}
 
 @router.post("/portfolio/evaluate")
+@handle_service_error("Evaluate trades")
 def api_trades_evaluate():
-    try:
-        items = load_trades()
-        done = 0
-        now_ms = int(time.time() * 1000)
-        for t in items:
-            if t.get("status") != "OPEN":
-                continue
-            opened_ms = int(t.get("opened_at") or 0) * 1000
-            horizon_days = int(t.get("horizon_days") or 7)
-            due_ms = opened_ms + horizon_days * 86400_000
-            if now_ms < due_ms:
-                continue
+    items = load_trades()
+    done = 0
+    now_ms = int(time.time() * 1000)
+    for t in items:
+        if t.get("status") != "OPEN":
+            continue
+        opened_ms = int(t.get("opened_at") or 0) * 1000
+        horizon_days = int(t.get("horizon_days") or 7)
+        due_ms = opened_ms + horizon_days * 86400_000
+        if now_ms < due_ms:
+            continue
 
-            px = get_prices(t["symbol"], interval="1day", limit=1) or {}
-            arr = px.get("prices") or []
-            if not arr:
-                continue
-            last = float(arr[-1]["close"])
-            entry = float(t["entry_price"])
-            ret = (last - entry) / (entry or 1.0)
-            update_trade_eval(t["id"], last=last, ret=ret, correct=(ret >= 0))
-            done += 1
-        return {"evaluated": done}
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Evaluate error: {e}")
+        px = get_prices(t["symbol"], interval="1day", limit=1) or {}
+        arr = px.get("prices") or []
+        if not arr:
+            continue
+        last = float(arr[-1]["close"])
+        entry = float(t["entry_price"])
+        ret = (last - entry) / (entry or 1.0)
+        update_trade_eval(t["id"], last=last, ret=ret, correct=(ret >= 0))
+        done += 1
+    return {"evaluated": done}

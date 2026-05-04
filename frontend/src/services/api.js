@@ -145,3 +145,25 @@ export async function getPaperTrade(symbol, opts = {}) {
   const { budget = 1000, horizon_days = 7, temp } = opts || {};
   return getJSON(`/papertrade/${encodeURIComponent(symbol)}${qs({ budget, horizon_days, temp })}`);
 }
+
+export async function getTrades() {
+  return getJSON('/portfolio/trades');
+}
+
+export async function evaluateTrades() {
+  // POST request for evaluation
+  const url = '/api/portfolio/evaluate';
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: JSON_HDRS,
+    });
+    if (res.ok && (res.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
+      return await res.json();
+    }
+    const txt = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${txt}`);
+  } catch (e) {
+    throw e;
+  }
+}

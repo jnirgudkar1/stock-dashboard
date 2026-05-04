@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import math
 import os
 import time
 import typing as t
 from dataclasses import dataclass
 
-# ---- Path resolution (repo root -> training_pipeline/models/...) ----
+# Path resolution (repo root -> training_pipeline/models/...)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "training_pipeline", "models", "price_direction_model.pkl")
 MODEL_PATH = os.getenv("PREDICT_MODEL_PATH", DEFAULT_MODEL_PATH)
@@ -13,7 +14,7 @@ MODEL_PATH = os.getenv("PREDICT_MODEL_PATH", DEFAULT_MODEL_PATH)
 # Default calibration temperature; UI can override per-request via ?temp=
 PREDICT_TEMP = float(os.getenv("PREDICT_TEMP", "1.0"))
 
-# ---- Optional sklearn imports (graceful fallback) ----
+# Optional sklearn imports (graceful fallback)
 try:
     import joblib  # type: ignore
 except Exception:
@@ -24,14 +25,12 @@ try:
 except Exception:
     LogisticRegression = None  # type: ignore
 
-# ---- Services used (in-memory) ----
+# Services used (in-memory)
 from .metadata_services import get_metadata
 from .prices import get_prices
 from .features import get_features  # technical + news features
 
-# --------------------------------------------------------------------------------------
-# Model loading wrapper
-# --------------------------------------------------------------------------------------
+
 @dataclass
 class ModelWrapper:
     model: t.Any | None = None
@@ -70,9 +69,7 @@ class ModelWrapper:
 _wrap = ModelWrapper()
 _wrap.load()
 
-# --------------------------------------------------------------------------------------
-# Feature pipelines
-# --------------------------------------------------------------------------------------
+# Feature order definitions
 TECH_FEATURE_ORDER = [
     "return_1d",
     "volatility_21d",
@@ -121,16 +118,12 @@ def _build_tech_features(symbol: str) -> tuple[dict, list[str]]:
     out = {k: _safe_float(feats.get(k)) for k in TECH_FEATURE_ORDER}
     return out, TECH_FEATURE_ORDER
 
-# --------------------------------------------------------------------------------------
-# Calibration + diagnostics
-# --------------------------------------------------------------------------------------
+# Calibration and confidence calculation utilities
 def _logit(p: float) -> float:
     p = min(max(p, 1e-6), 1 - 1e-6)
-    import math
     return math.log(p / (1 - p))
 
 def _sigmoid(x: float) -> float:
-    import math
     return 1.0 / (1.0 + math.exp(-x))
 
 def _calibrate(p: float, temperature: float) -> float:
@@ -168,9 +161,7 @@ def _top_features(model: t.Any, x_vec: list[float], order: list[str], top_k: int
     contribs.sort(key=lambda t3: abs(t3[2]), reverse=True)
     return [{"name": n, "weight": round(w, 6), "contribution": round(c, 6)} for n, w, c in contribs[:top_k]]
 
-# --------------------------------------------------------------------------------------
-# Public API
-# --------------------------------------------------------------------------------------
+
 def score_valuation(symbol: str) -> dict:
     meta = get_metadata(symbol) or {}
     return {
@@ -222,7 +213,6 @@ def predict_direction(symbol: str, temp: float | None = None) -> dict:
             df = getattr(_wrap.model, "decision_function", None)
             if callable(df):
                 raw = float(df([x_vec])[0])
-                import math
                 prob_up = 1.0 / (1.0 + math.exp(-raw))
             else:
                 prob_up = 0.5

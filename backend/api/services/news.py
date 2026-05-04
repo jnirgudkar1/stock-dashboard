@@ -27,10 +27,9 @@ from typing import Dict, Tuple
 
 import requests
 
-# ---------------------------
-# Config
-# ---------------------------
+from .. import save_cache, load_cache
 
+# API Configuration
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY") or os.getenv("GNEWS_KEY") or ""
 GNEWS_ENDPOINT = "https://gnews.io/api/v4/search"  # free tier supports search
 
@@ -40,9 +39,21 @@ _CACHE_TTL_ARTICLE = int(os.getenv("ARTICLE_CACHE_TTL", "86400"))  # 24h
 _search_cache: Dict[Tuple[str, int], Tuple[float, list[dict]]] = {}
 _article_cache: Dict[str, Tuple[float, dict]] = {}
 
-# ---------------------------
-# Utilities
-# ---------------------------
+# Load persistent caches on startup
+try:
+    _search_persisted = load_cache("news_search")
+    for key, (ts, data) in _search_persisted.items():
+        _search_cache[key] = (ts, data)
+except Exception:
+    pass
+
+try:
+    _article_persisted = load_cache("articles")
+    for key, (ts, data) in _article_persisted.items():
+        _article_cache[key] = (ts, data)
+except Exception:
+    pass
+
 
 def _label_color_from_score(score: float) -> tuple[str, str]:
     """Map sentiment score [-1..1] to (label, color)."""
@@ -63,16 +74,21 @@ def _cache_get(cache: dict, key, ttl: int):
 
 def _cache_set(cache: dict, key, val):
     cache[key] = (time.time(), val)
+    # Persist to disk
+    try:
+        if cache is _search_cache:
+            save_cache("news_search", cache)
+        elif cache is _article_cache:
+            save_cache("articles", cache)
+    except Exception:
+        pass  # Log silently - caching failure shouldn't crash the app
 
 
 def _extract_tickers(text: str) -> list[str]:
-    return re.findall(r"\b[A-Z]{2,5}\b", text or "")
+        pass  # Log silently - caching failure shouldn't crash the app
 
 
-# ---------------------------
-# Sentiment (heuristic, no ML)
-# ---------------------------
-
+# Sentiment wordlists (heuristic, no ML)
 _POS = set("""beat beats beating surge surges bullish upgrade record rally rebound surge strong growth profit profits profitable upside raised raises
 outperform buy buys optimistic optimisticly optimism expand expanding expansion accelerate accelerating""".split())
 _NEG = set("""miss misses missed plunge plunges bearish downgrade lawsuit probe investigation fraud cut cuts cutting cutting cut guidance warning warns
@@ -93,9 +109,7 @@ def sentiment(text: str) -> dict:
     return {"score": round(score, 4), "label": label, "color": color}
 
 
-# ---------------------------
 # Impact score 0..1 (display as 0..100 on frontend)
-# ---------------------------
 
 _SRC_WEIGHTS = {
     "reuters": 1.0, "bloomberg": 1.0, "wsj": 0.95, "financial times": 0.95,
@@ -135,9 +149,6 @@ def impact_score(item: dict) -> float:
     return max(0.0, min(1.0, score))
 
 
-# ---------------------------
-# Search news
-# ---------------------------
 
 def search_news(query: str | None = None, symbol: str | None = None, *, max_items: int = 20) -> list[dict]:
     """Search news via GNews for a query or symbol, normalized to a compact shape.
@@ -217,10 +228,7 @@ def _parse_iso_to_epoch(s: str) -> int:
         return 0
 
 
-# ---------------------------
-# Article fetch + text extract
-# ---------------------------
-
+# User agent for web scraping
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -255,9 +263,6 @@ def _html_to_text(html: str) -> str:
     return txt.strip()
 
 
-# ---------------------------
-# Summarization (extractive, optional)
-# ---------------------------
 
 def summarize_text(text: str, max_sentences: int = 5) -> str:
     """
@@ -285,5 +290,4 @@ def summarize_text(text: str, max_sentences: int = 5) -> str:
     ranked = sorted([(i, score_sentence(s)) for i, s in enumerate(sentences)], key=lambda x: x[1], reverse=True)
     keep_idx = set(i for i, _ in ranked[:max_sentences])
     kept = [s for i, s in enumerate(sentences) if i in keep_idx]
-    return " ".join(kept)
     return " ".join(kept)

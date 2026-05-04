@@ -1,10 +1,9 @@
-# backend/api/services/metadata_services.py
 from __future__ import annotations
 
 import os
 import time
 from typing import Optional, Dict, Any
-import requests
+from .. import save_cache, load_cache
 
 # Optional fallback (already installed in this project)
 try:
@@ -12,9 +11,8 @@ try:
 except Exception:
     finnhub = None  # degrade gracefully if not present
 
-# -------------------------
-# Config
-# -------------------------
+
+# API Configuration
 ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query"
 
@@ -27,6 +25,14 @@ CACHE_TTL = int(os.getenv("METADATA_CACHE_TTL", "7200"))  # default 2 hours
 # In-memory cache (symbol -> (ts, data))
 _metadata_cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
 
+# Load persistent cache on startup
+try:
+    _persisted = load_cache("metadata")
+    for key, (ts, data) in _persisted.items():
+        _metadata_cache[key] = (ts, data)
+except Exception:
+    pass
+
 # Only fields guaranteed across our code paths (EPS is optional)
 RESPONSE_FIELDS = [
     "symbol", "name", "description", "sector", "industry",
@@ -34,9 +40,6 @@ RESPONSE_FIELDS = [
 ]
 
 
-# -------------------------
-# Helpers
-# -------------------------
 def _now() -> float:
     return time.time()
 
@@ -88,9 +91,6 @@ def _is_minimum_metadata(d: dict) -> bool:
     return all(d.get(k) is not None for k in ["symbol", "name", "sector", "industry", "marketCap"])
 
 
-# -------------------------
-# Public API
-# -------------------------
 def get_metadata(symbol: str) -> dict:
     symbol = symbol.upper()
     now = _now()
@@ -108,6 +108,11 @@ def get_metadata(symbol: str) -> dict:
         # Keep only our response fields (and ensure all exist)
         data = {k: alpha.get(k) for k in RESPONSE_FIELDS}
         _metadata_cache[symbol] = (now, data)
+        # Persist to disk
+        try:
+            save_cache("metadata", _metadata_cache)
+        except Exception:
+            pass
         return data
 
     # 3) Optional: Finnhub fallback
@@ -116,14 +121,16 @@ def get_metadata(symbol: str) -> dict:
         if fb and _is_minimum_metadata(fb):
             data = {k: fb.get(k) for k in RESPONSE_FIELDS}
             _metadata_cache[symbol] = (now, data)
+            # Persist to disk
+            try:
+                save_cache("metadata", _metadata_cache)
+            except Exception:
+                pass
             return data
 
     return {"error": "Could not fetch metadata."}
 
 
-# -------------------------
-# Fetchers
-# -------------------------
 def _fetch_alpha_overview(symbol: str) -> Optional[dict]:
     if not ALPHA_VANTAGE_API_KEY:
         return None

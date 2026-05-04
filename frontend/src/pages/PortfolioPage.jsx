@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getTrades, evaluateTrades } from '../services/api';
 
 async function fetchLastClose(symbol) {
   const res = await fetch(`/api/stocks/${encodeURIComponent(symbol)}/prices?interval=1day&limit=1`, {
@@ -13,6 +14,7 @@ async function fetchLastClose(symbol) {
 
 const PortfolioPage = () => {
   const [portfolio, setPortfolio] = useState([]);
+  const [useBackend, setUseBackend] = useState(false);
   const [form, setForm] = useState({
     ticker: '',
     price: '',
@@ -22,13 +24,30 @@ const PortfolioPage = () => {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('portfolio');
-    if (saved) setPortfolio(JSON.parse(saved));
+    const loadPortfolio = async () => {
+      try {
+        const backend = await getTrades();
+        if (backend && backend.items && backend.items.length > 0) {
+          setPortfolio(backend.items);
+          setUseBackend(true);
+          return;
+        }
+      } catch (e) {
+        // Fall back to localStorage
+      }
+      const saved = localStorage.getItem('portfolio');
+      if (saved) setPortfolio(JSON.parse(saved));
+    };
+    loadPortfolio();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('portfolio', JSON.stringify(portfolio));
-  }, [portfolio]);
+    if (!useBackend) {
+      localStorage.setItem('portfolio', JSON.stringify(portfolio));
+    }
+  }, [portfolio, useBackend]);
+
+  // ...existing code...
 
   const handleChange = e => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -49,36 +68,48 @@ const PortfolioPage = () => {
     if (!portfolio.length) return;
     setBusy(true);
     try {
-      const now = Date.now();
-      const next = [];
-      for (const row of portfolio) {
-        const meta = row._papertrade;
-        if (!meta || row._eval) { next.push(row); continue; }
+      if (useBackend) {
+        // Use backend evaluation
+        const result = await evaluateTrades();
+        alert(`Backend evaluated ${result?.evaluated || 0} trades`);
+        // Reload portfolio from backend
+        const updated = await getTrades();
+        if (updated && updated.items) setPortfolio(updated.items);
+      } else {
+        // Local evaluation (existing logic)
+        const now = Date.now();
+        const next = [];
+        for (const row of portfolio) {
+          const meta = row._papertrade;
+          if (!meta || row._eval) { next.push(row); continue; }
 
-        const openedAtMs = row.date ? new Date(row.date).getTime() : row.id;
-        const dueAtMs = openedAtMs + (meta.horizon_days || 7) * 24 * 3600 * 1000;
+          const openedAtMs = row.date ? new Date(row.date).getTime() : row.id;
+          const dueAtMs = openedAtMs + (meta.horizon_days || 7) * 24 * 3600 * 1000;
 
-        if (now >= dueAtMs) {
-          try {
-            const last = await fetchLastClose(row.ticker);
-            const entry = Number(row.price);
-            const ret = (last - entry) / (entry || 1);
-            const correct = ret >= 0; // long-only evaluation
-            next.push({ ...row, _eval: { asOf: new Date().toISOString(), last, ret, correct } });
-          } catch (e) {
-            next.push({ ...row, _eval: { error: String(e) } });
+          if (now >= dueAtMs) {
+            try {
+              const last = await fetchLastClose(row.ticker);
+              const entry = Number(row.price);
+              const ret = (last - entry) / (entry || 1);
+              const correct = ret >= 0; // long-only evaluation
+              next.push({ ...row, _eval: { asOf: new Date().toISOString(), last, ret, correct } });
+            } catch (e) {
+              next.push({ ...row, _eval: { error: String(e) } });
+            }
+          } else {
+            next.push(row);
           }
-        } else {
-          next.push(row);
         }
-      }
-      setPortfolio(next);
+        setPortfolio(next);
 
-      // quick summary
-      const closed = next.filter(r => r._eval && typeof r._eval.ret === 'number');
-      const hit = closed.filter(r => r._eval.correct).length;
-      const avg = closed.reduce((s, r) => s + (Number(r._eval.ret) || 0), 0) / (closed.length || 1);
-      alert(`Evaluated ${closed.length} trades\nHit-rate: ${closed.length ? Math.round((hit/closed.length)*100) : 0}%\nAvg return: ${(avg*100).toFixed(2)}%`);
+        // quick summary
+        const closed = next.filter(r => r._eval && typeof r._eval.ret === 'number');
+        const hit = closed.filter(r => r._eval.correct).length;
+        const avg = closed.reduce((s, r) => s + (Number(r._eval.ret) || 0), 0) / (closed.length || 1);
+        alert(`Evaluated ${closed.length} trades\nHit-rate: ${closed.length ? Math.round((hit/closed.length)*100) : 0}%\nAvg return: ${(avg*100).toFixed(2)}%`);
+      }
+    } catch (e) {
+      alert(`Evaluation failed: ${e?.message || e}`);
     } finally {
       setBusy(false);
     }

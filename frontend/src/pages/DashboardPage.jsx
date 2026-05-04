@@ -141,12 +141,24 @@ export default function DashboardPage() {
     };
   }, [chartData]);
 
+  const currentPrice = chartData.length > 0 ? chartData[chartData.length - 1].close : null;
+
   return (
     <div className="max-w-6xl mx-auto p-4 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <div className="text-sm text-gray-500">Symbol: <b>{symbol}</b></div>
       </div>
+
+      {/* Current Price Display */}
+      {currentPrice !== null && !loading && (
+        <div className="p-4 rounded-2xl border-2 border-purple-300 bg-purple-50">
+          <div className="flex items-baseline gap-2">
+            <span className="text-lg font-semibold text-gray-700">{symbol}:</span>
+            <span className="text-4xl font-bold text-purple-600">${currentPrice.toFixed(2)}</span>
+          </div>
+        </div>
+      )}
 
       {loading && <div className="p-3 rounded-xl bg-gray-50 text-sm text-gray-600">Loading…</div>}
       {err && <div className="p-3 rounded-xl bg-rose-50 text-rose-700 text-sm">{err}</div>}
